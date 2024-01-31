@@ -64,7 +64,7 @@ class FlappyBirdEnvSimple(gym.Env):
             be drawn.
     """
 
-    metadata = {'render.modes': ['human']}
+    metadata = {'render.modes': ['human', 'rgb_array']}
 
     def __init__(self,
                  screen_size: Tuple[int, int] = (288, 512),
@@ -162,10 +162,14 @@ class FlappyBirdEnvSimple(gym.Env):
                                                 pipe_color=self._pipe_color,
                                                 background=self._bg_type)
             self._renderer.game = self._game
-            self._renderer.make_display()
 
         self._renderer.draw_surface(show_score=True)
-        self._renderer.update_display()
+        if mode == "rgb_array":
+            return pygame.surfarray.array3d(self._renderer.surface)
+        else:
+            if self._renderer.display is None:
+                self._renderer.make_display()
+            self._renderer.update_display()
 
     def close(self):
         """ Closes the environment. """
