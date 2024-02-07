@@ -75,7 +75,7 @@ class FlappyBirdEnvSimple(gym.Env):
                  background: Optional[str] = "day") -> None:
         self.action_space = gym.spaces.Discrete(2)
         self.observation_space = gym.spaces.Box(-np.inf, np.inf,
-                                                shape=(2,),
+                                                shape=(6,),
                                                 dtype=np.float32)
         self._screen_size = screen_size
         self._normalize_obs = normalize_obs
@@ -88,32 +88,41 @@ class FlappyBirdEnvSimple(gym.Env):
         self._pipe_color = pipe_color
         self._bg_type = background
 
-    def _get_observation(self):
-        up_pipe = low_pipe = None
-        h_dist = 0
-        for up_pipe, low_pipe in zip(self._game.upper_pipes,
-                                     self._game.lower_pipes):
-            h_dist = (low_pipe["x"] + PIPE_WIDTH / 2
-                      - (self._game.player_x - PLAYER_WIDTH / 2))
-            h_dist += 3  # extra distance to compensate for the buggy hit-box
-            if h_dist >= 0:
-                break
+        self._y_tmin2 = 0
+        self._y_tmin1 = 0
 
-        upper_pipe_y = up_pipe["y"] + PIPE_HEIGHT
-        lower_pipe_y = low_pipe["y"]
+    def _get_pos(self):
         player_y = self._game.player_y
+        h_dists = np.array([np.nan, np.nan, np.nan], dtype=np.float32)   # Assumes there's only three pipes ever
+        v_dists = np.array([np.nan, np.nan, np.nan], dtype=np.float32)
+        for i, (up_pipe, low_pipe) in enumerate(zip(self._game.upper_pipes, self._game.lower_pipes)):
+            upper_pipe_y = up_pipe["y"] + PIPE_HEIGHT
+            lower_pipe_y = low_pipe["y"]
+            h_dists[i] = (low_pipe["x"] + PIPE_WIDTH / 2 - (self._game.player_x - PLAYER_WIDTH / 2)) + 3  # extra distance to compensate for buggy hit-box
+            v_dists[i] = (upper_pipe_y + lower_pipe_y) / 2 - (player_y + PLAYER_HEIGHT/2)
 
-        v_dist = (upper_pipe_y + lower_pipe_y) / 2 - (player_y
-                                                      + PLAYER_HEIGHT/2)
+        idxs = np.argsort(h_dists)
+        h_dists, v_dists = h_dists[idxs], v_dists[idxs]
+        h_dists, v_dists = h_dists[h_dists >= 0], v_dists[h_dists >= 0] # remove nans and past pipes
 
         if self._normalize_obs:
-            h_dist /= self._screen_size[0]
-            v_dist /= self._screen_size[1]
+            h_dists /= self._screen_size[0]
+            v_dists /= self._screen_size[1]
 
-        return np.array([
-            h_dist,
-            v_dist,
-        ])
+        if len(h_dists) == 2:
+            return np.concatenate([h_dists, v_dists])
+        else:
+            return np.array([h_dists[0], -1, v_dists[0], -1])
+
+    def _get_obs(self):
+        delta_min1, delta_now = self._y_tmin1 - self._y_tmin2, self._y_tmin1 - self._game.player_y
+        if self._normalize_obs:
+            delta_min1 /= self._screen_size[1]
+            delta_now /= self._screen_size[1]
+        return np.append(
+            self._get_pos(),
+            [delta_min1, delta_now]
+        )
 
     def step(self,
              action: Union[FlappyBirdLogic.Actions, int],
@@ -135,10 +144,18 @@ class FlappyBirdEnvSimple(gym.Env):
                   otherwise);
                 * an info dictionary.
         """
+        self._y_tmin2 = self._y_tmin1
+        self._y_tmin1 = self._game.player_y
         alive = self._game.update_state(action)
         obs = self._get_observation()
 
-        reward = 1
+        if alive:
+            if action == 0:
+                reward = 1.
+            else:
+                reward = 0.5
+        else:
+            reward = 0.
 
         done = not alive
         info = {"score": self._game.score}
@@ -147,12 +164,15 @@ class FlappyBirdEnvSimple(gym.Env):
 
     def reset(self):
         """ Resets the environment (starts a new game). """
+        self._y_tmin2 = 0
+        self._y_tmin1 = 0
         self._game = FlappyBirdLogic(screen_size=self._screen_size,
                                      pipe_gap_size=self._pipe_gap)
         if self._renderer is not None:
             self._renderer.game = self._game
 
-        return self._get_observation()
+        self.step(0)
+        return self.step(0)[0]
 
     def render(self, mode='human') -> None:
         """ Renders the next frame. """
