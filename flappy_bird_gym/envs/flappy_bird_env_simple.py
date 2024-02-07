@@ -147,7 +147,7 @@ class FlappyBirdEnvSimple(gym.Env):
         self._y_tmin2 = self._y_tmin1
         self._y_tmin1 = self._game.player_y
         alive = self._game.update_state(action)
-        obs = self._get_observation()
+        obs = self._get_obs()
 
         if alive:
             if action == 0:
